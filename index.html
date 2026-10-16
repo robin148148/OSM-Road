@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Số Hóa Tim Đường 3-Trong-1</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+#header{background:#1a5276;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+#header h1{font-size:16px}
+#header span{font-size:11px;opacity:.8}
+#main{display:flex;flex:1;min-height:0}
+#sidebar{width:380px;min-width:340px;background:#fff;border-right:1px solid #ddd;display:flex;flex-direction:column;overflow:hidden}
+#tabs{display:flex;border-bottom:2px solid #1a5276;flex-shrink:0}
+.tab{flex:1;padding:10px 4px;text-align:center;cursor:pointer;font-size:12px;font-weight:bold;background:#f0f0f0;border:none;border-right:1px solid #ddd}
+.tab.active{background:#1a5276;color:#fff}
+.tabcontent{display:none;padding:12px;overflow-y:auto;flex:1}
+.tabcontent.active{display:block}
+.btn{padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;margin:4px 2px}
+.btn-primary{background:#1a5276;color:#fff}
+.btn-success{background:#27ae60;color:#fff}
+.btn-warning{background:#f39c12;color:#fff}
+.btn-danger{background:#c0392b;color:#fff}
+.btn-secondary{background:#ecf0f1;color:#333}
+input,select,textarea{width:100%;padding:7px;border:1px solid #ccc;border-radius:5px;font-size:13px;margin:4px 0}
+label{font-size:12px;font-weight:bold;color:#444;display:block;margin-top:8px}
+.info{background:#eaf2f8;padding:8px;border-radius:6px;font-size:12px;line-height:1.6;margin:8px 0}
+.warn{background:#fef9e7;padding:8px;border-radius:6px;font-size:12px;line-height:1.6;margin:8px 0;border:1px solid #f9e79f}
+#map{flex:1;height:100%}
+#status{padding:6px 12px;background:#f8f9fa;border-top:1px solid #ddd;font-size:11px;color:#555;flex-shrink:0}
+table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+th,td{border:1px solid #ddd;padding:4px 6px;text-align:left}
+th{background:#1a5276;color:#fff}
+.dropzone{border:2px dashed #1a5276;border-radius:8px;padding:20px;text-align:center;color:#666;cursor:pointer;margin:8px 0;font-size:13px}
+.dropzone.dragover{background:#eaf2f8;border-color:#27ae60}
+@media(max-width:768px){#main{flex-direction:column}#sidebar{width:100%;min-width:0;max-height:48vh;border-right:none;border-bottom:1px solid #ddd}#map{height:52vh}}
+</style>
+</head>
+<body>
+<div id="header">
+<h1>🛣️ Số Hóa Tim Đường 3-Trong-1</h1>
+<span>Google Hybrid • VN-2000 ↔ WGS84 • LRS từng 100m</span>
+</div>
+<div id="main">
+<div id="sidebar">
+<div id="tabs">
+<button class="tab active" onclick="showTab(1)">Tab 1: Bám Tim</button>
+<button class="tab" onclick="showTab(2)">Tab 2: Nhập File</button>
+<button class="tab" onclick="showTab(3)">Tab 3: OSM</button>
+</div>
+
+<!-- TAB 1 -->
+<div id="tab1" class="tabcontent active">
+<div class="info"><b>Hướng dẫn:</b> Bấm vào bản đồ để đặt Điểm đầu → Điểm giữa → Điểm cuối. Hệ thống nối thành tim đường và nội suy lý trình LRS. Kéo các điểm (drag) để chỉnh.</div>
+<div class="warn" id="osmStatus"><b>📌 Bám tim đường:</b> Tải tuyến từ Tab 3 (OSM) trước → sang Tab 1 chỉ cần bấm 3 điểm (Đầu – Giữa – Cuối) → hệ thống tự bám vào tim đường thực tế và nối theo đường cong. Không giới hạn khoảng cách bấm. Dữ liệu OSM được lưu cache 7 ngày, không cần tải lại.</div>
+<label>Tên tuyến</label>
+<input type="text" id="routeName" placeholder="VD: TSĐ - Đoạn Đak Roong → Ia Dreh" value="Tuyến mới">
+<label>Điểm bắt đầu (Km)</label>
+<input type="number" id="startKm" value="0" step="0.1">
+<label>Hướng lý trình</label>
+<select id="direction"><option value="forward">Tăng dần theo thứ tự điểm</option><option value="reverse">Giảm dần</option></select>
+<div style="margin-top:10px">
+<button class="btn btn-primary" id="btnDigitize" onclick="startDigitize()">✏️ Bắt đầu bấm điểm</button>
+<button class="btn btn-warning" onclick="undoPoint()">↩️ Hoàn tác</button>
+<button class="btn btn-danger" onclick="clearRoute()">🗑️ Xóa hết</button>
+</div>
+<label>Hoặc dán bảng Excel (Tên, Vĩ độ, Kinh độ — mỗi dòng 1 điểm)</label>
+<textarea id="excelPaste" rows="4" placeholder="Điểm đầu&#9;13.5&#9;108.2&#10;Điểm giữa&#9;13.6&#9;108.3"></textarea>
+<button class="btn btn-success" onclick="importExcel()">📋 Nhập từ Excel</button>
+<div id="pointsList"></div>
+<div style="margin-top:12px;border-top:2px solid #1a5276;padding-top:10px">
+<button class="btn btn-success" id="btnConnect" onclick="connectRoute()">🔗 Nối thành tim đường + Tính LRS</button>
+<button class="btn btn-primary" onclick="showLRSTable()">📊 Xem bảng LRS</button>
+</div>
+<div id="lrsTable"></div>
+</div>
+
+<!-- TAB 2 -->
+<div id="tab2" class="tabcontent">
+<div class="info"><b>Nhập file kỹ thuật:</b> Kéo-thả hoặc chọn file .kml, .geojson, .shp (zip), .dxf. Hệ thống tự nhận dạng hệ tọa độ và chuyển sang WGS84.</div>
+<label>Tỉnh / Thành (để xác định kinh tuyến trục VN-2000)</label>
+<select id="provinceSelect">
+<option value="auto">Tự động nhận dạng</option>
+<option value="104.75">Gia Lai (KT 104°45')</option>
+<option value="105">Kon Tum (KT 105°)</option>
+<option value="106.25">Đắk Lắk (KT 106°15')</option>
+<option value="108.25">Bình Định (KT 108°15')</option>
+<option value="105.75">Phú Yên (KT 105°45')</option>
+<option value="107.75">Khánh Hòa (KT 107°45')</option>
+<option value="106">Hà Nội (KT 105°)</option>
+<option value="105.75">TP.HCM (KT 105°45')</option>
+<option value="104.5">Cần Thơ (KT 104°30')</option>
+</select>
+<div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+📁 Kéo-thả file vào đây hoặc bấm để chọn<br><small>.kml, .geojson, .shp.zip, .dxf</small>
+</div>
+<input type="file" id="fileInput" accept=".kml,.geojson,.json,.dxf,.zip" style="display:none" onchange="handleFile(this.files[0])">
+<div id="fileInfo"></div>
+<div class="warn"><b>VN-2000 → WGS84:</b> Nếu file dùng VN-2000, chọn đúng tỉnh để hệ thống tự chuyển. Nếu file đã là WGS84 (GPS), chọn "Tự động" — hệ thống nhận dạng bằng cách kiểm tra khoảng tọa độ.</div>
+</div>
+
+<!-- TAB 3 -->
+<div id="tab3" class="tabcontent">
+<div class="info"><b>Tải từ OpenStreetMap:</b> Chọn mã tuyến từ danh sách (đã xác minh) hoặc gõ mã tùy ý. Hệ thống tải hình học từ Overpass API và gộp thành tim tuyến liên tục.</div>
+<div class="warn"><b>⚠️ Nguồn danh sách (từ web, không từ dữ liệu user):</b> Cao tốc 46 tuyến (CT.01-CT.46). Quốc lộ 152 tuyến từ Wikipedia. <b>Bỏ qua ĐT</b> — đường tỉnh do từng tỉnh quản lý, không thuộc hệ thống toàn quốc. Khu vực tỉnh: 34 tỉnh/thành sau sáp nhập 01/07/2025.</div>
+<div class="warn"><b>⚠️ Giới hạn OSM:</b> Dữ liệu OSM do cộng đồng đóng góp, không phải dữ liệu chính thức. Một số tuyến có thể thiếu, đứt đoạn hoặc chưa cập nhật. Với công việc chính thức, dùng Tab 1 (bấm tay) hoặc Tab 2 (file kỹ thuật).</div>
+<label>Mã tuyến (chọn từ danh sách toàn quốc)</label>
+<select id="osmRefSelect" onchange="onRouteSelect()">
+<option value="">-- Chọn mã tuyến --</option>
+</select>
+<label>Hoặc gõ mã tùy ý</label>
+<input type="text" id="osmRef" placeholder="VD: QL.19, ĐT.667, TSĐ">
+<label>Khu vực tỉnh / Thành (34 tỉnh sau sáp nhập 2025)</label>
+<select id="osmProvince">
+<option value="">Toàn quốc (không giới hạn tỉnh)</option>
+<option value="Hà Nội">Hà Nội</option>
+<option value="Cao Bằng">Cao Bằng</option>
+<option value="Tuyên Quang">Tuyên Quang</option>
+<option value="Điện Biên">Điện Biên</option>
+<option value="Lai Châu">Lai Châu</option>
+<option value="Sơn La">Sơn La</option>
+<option value="Lào Cai">Lào Cai</option>
+<option value="Thái Nguyên">Thái Nguyên</option>
+<option value="Lạng Sơn">Lạng Sơn</option>
+<option value="Quảng Ninh">Quảng Ninh</option>
+<option value="Bắc Ninh">Bắc Ninh</option>
+<option value="Phú Thọ">Phú Thọ</option>
+<option value="Hải Phòng">Hải Phòng</option>
+<option value="Hưng Yên">Hưng Yên</option>
+<option value="Ninh Bình">Ninh Bình</option>
+<option value="Thanh Hóa">Thanh Hóa</option>
+<option value="Nghệ An">Nghệ An</option>
+<option value="Hà Tĩnh">Hà Tĩnh</option>
+<option value="Quảng Trị">Quảng Trị</option>
+<option value="Huế">Huế</option>
+<option value="Đà Nẵng">Đà Nẵng</option>
+<option value="Quảng Ngãi">Quảng Ngãi</option>
+<option value="Gia Lai" selected>Gia Lai</option>
+<option value="Khánh Hòa">Khánh Hòa</option>
+<option value="Đắk Lắk">Đắk Lắk</option>
+<option value="Lâm Đồng">Lâm Đồng</option>
+<option value="Đồng Nai">Đồng Nai</option>
+<option value="TP. Hồ Chí Minh">TP. Hồ Chí Minh</option>
+<option value="Tây Ninh">Tây Ninh</option>
+<option value="Đồng Tháp">Đồng Tháp</option>
+<option value="Vĩnh Long">Vĩnh Long</option>
+<option value="An Giang">An Giang</option>
+<option value="Cần Thơ">Cần Thơ</option>
+<option value="Cà Mau">Cà Mau</option>
+</select>
+<label>Loại đường (tùy chọn)</label>
+<select id="osmType"><option value="">Tất cả</option><option value="primary">Quốc lộ (primary)</option><option value="secondary">Tỉnh lộ (secondary)</option><option value="tertiary">Huyện lộ (tertiary)</option></select>
+<button class="btn btn-primary" onclick="fetchOSM()">🌐 Tải từ Overpass</button>
+<div id="osmInfo"></div>
+<div style="margin-top:10px;font-size:11px;color:#666">
+<button class="btn btn-secondary" onclick="var n=clearOSMCache();alert('Đã xóa '+n+' tuyến trong cache.');document.getElementById('osmInfo').innerHTML='Cache đã xóa.';">🗑️ Xóa cache OSM</button>
+<span>Cache lưu 7 ngày trong trình duyệt, tải lại không cần gọi Overpass.</span>
+</div>
+</div>
+
+<div style="padding:12px;border-top:2px solid #1a5276;flex-shrink:0">
+<b>🎬 Hoạt cảnh tuyến (Motion)</b><br>
+<div style="font-size:11px;color:#555;margin:4px 0;">Sau khi tải tuyến OSM (Tab 3) hoặc nối tuyến (Tab 1), bấm Chạy để xem con trỏ chạy dọc tuyến.</div>
+<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+<button class="btn btn-primary" onclick="startMotion()">▶ Chạy hoạt cảnh</button>
+<button class="btn" onclick="stopMotion()">⏹ Dừng</button>
+<label style="font-size:12px;">Tốc độ: <select id="motionSpeed"><option value="50">Chậm</option><option value="20" selected>Vừa</option><option value="5">Nhanh</option></select></label>
+</div>
+<div id="motionInfo" style="font-size:11px;color:#555;margin-top:4px;"></div>
+</div>
+
+<div style="padding:12px;border-top:2px solid #1a5276;flex-shrink:0">
+<b>📤 Xuất dữ liệu</b><br>
+<div style="margin-top:6px">
+<button class="btn btn-success" onclick="exportGeoJSON()">GeoJSON</button>
+<button class="btn btn-success" onclick="exportKML()">KML</button>
+<button class="btn btn-success" onclick="exportCSV()">CSV / Excel</button>
+</div>
+<div id="exportInfo" style="font-size:11px;color:#555;margin-top:6px"></div>
+</div>
+</div>
+<div id="map"></div>
+</div>
+<div id="status">Sẵn sàng — Chọn tab và bắt đầu.</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+<script>
+// ===== BIẾN TOÀN CỤC =====
+var map, drawLayer, routeLine, markers=[];
+var routePoints=[]; // [{lat,lon,name}]
+var isDigitizing=false;
+var currentRoute=null; // {coords:[{lat,lon}], name, source}
+var osmReference=null; // Tuyến OSM tham chiếu để bám tim
+var KT_AXES={104.75:'Gia Lai',105:'Kon Tum',106.25:'Đắk Lắk',108.25:'Bình Định',105.75:'Phú Yên',107.75:'Khánh Hòa',104.5:'Cần Thơ'};
+
+// ===== KHỞI TẠO BẢN ĐỒ =====
+
+// Khởi tạo dropdown mã tuyến
+function initRouteDropdown(){
+  var sel = document.getElementById('osmRefSelect');
+  if(!sel) return;
+  for(var cat in VN_ROUTES){
+    var og = document.createElement('optgroup');
+    og.label = cat;
+    VN_ROUTES[cat].forEach(function(r){
+      var o = document.createElement('option');
+      o.value = r; o.text = r;
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  }
+}
+function onRouteSelect(){
+  var v = document.getElementById('osmRefSelect').value;
+  if(v) document.getElementById('osmRef').value = v;
+}
+
+function initMap(){
+  map=L.map('map').setView([13.9,108.2],9);
+  L.tileLayer('https://{s}.google.com/vt/lyrs=y&hl=vi&x={x}&y={y}&z={z}',{maxZoom:20,subdomains:['mt0','mt1','mt2','mt3'],attribution:'Google'}).addTo(map);
+  L.tileLayer('https://{s}.google.com/vt/lyrs=h&hl=vi&x={x}&y={y}&z={z}',{maxZoom:20,subdomains:['mt0','mt1','mt2','mt3'],opacity:0.8}).addTo(map);
+  drawLayer=L.layerGroup().addTo(map);
+  map.on('click',function(e){
+    if(isDigitizing){
+      addPoint(e.latlng.lat, e.latlng.lng, 'Điểm '+(routePoints.length+1));
+      console.log('Đã thêm điểm:', e.latlng.lat, e.latlng.lng);
+    }
+  });
+  setStatus('Bản đồ sẵn sàng. Chọn Tab 1 để bấm điểm.');
+}
+function setStatus(s){ document.getElementById('status').textContent=s; }
+function showTab(n){
+  document.querySelectorAll('.tab').forEach(function(t,i){ t.classList.toggle('active',i===n-1); });
+  document.querySelectorAll('.tabcontent').forEach(function(c,i){ c.classList.toggle('active',i===n-1); });
+}
+
+// ===== TIỆN ÍCH ĐỊA LÝ =====
+function haversine(a,b){
+  var R=6371000, dLat=(b.lat-a.lat)*Math.PI/180, dLon=(b.lon-a.lon)*Math.PI/180;
+  var s=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function routeLength(coords){
+  var t=0; for(var i=1;i<coords.length;i++) t+=haversine(coords[i-1],coords[i]); return t;
+}
+// Nội suy điểm tại khoảng cách d (m) dọc tuyến
+function pointAtDistance(coords,d){
+  var acc=0;
+  for(var i=1;i<coords.length;i++){
+    var seg=haversine(coords[i-1],coords[i]);
+    if(acc+seg>=d){
+      var f=(d-acc)/seg;
+      return {lat:coords[i-1].lat+(coords[i].lat-coords[i-1].lat)*f, lon:coords[i-1].lon+(coords[i].lon-coords[i-1].lon)*f};
+    }
+    acc+=seg;
+  }
+  return coords[coords.length-1];
+}
+
+// ===== NỐI ĐOẠN OSM THEO TÍNH LIÊN THÔNG =====
+// Overpass trả về các đoạn rời rạc không theo thứ tự.
+// Hàm này sắp xếp các đoạn thành tuyến liên tục bằng cách:
+// 1. Bắt đầu từ đoạn bất kỳ, tìm đoạn tiếp theo có điểm đầu trùng điểm cuối
+// 2. Đảo ngược đoạn nếu cần (điểm cuối trùng điểm cuối)
+// 3. Nếu không tìm được đoạn tiếp theo, bắt đầu tuyến mới (tách nhánh)
+function chainOSMSegments(segments){
+  // segments: mảng các đoạn, mỗi đoạn là mảng [{lat,lon},...]
+  if(!segments || segments.length===0) return [];
+  // Loại đoạn quá ngắn (<2 điểm) và loại trùng lặp
+  var segs = segments.filter(function(s){ return s && s.length>=2; });
+  if(segs.length===0) return [];
+  // Dedupe: bỏ đoạn trùng (cùng điểm đầu + điểm cuối)
+  var seen = {};
+  segs = segs.filter(function(s){
+    var key = s[0].lat.toFixed(5)+','+s[0].lon.toFixed(5)+'|'+s[s.length-1].lat.toFixed(5)+','+s[s.length-1].lon.toFixed(5);
+    var keyRev = s[s.length-1].lat.toFixed(5)+','+s[s.length-1].lon.toFixed(5)+'|'+s[0].lat.toFixed(5)+','+s[0].lon.toFixed(5);
+    if(seen[key] || seen[keyRev]) return false;
+    seen[key]=true; seen[keyRev]=true;
+    return true;
+  });
+  var used = new Array(segs.length).fill(false);
+  var result = [];
+  var remaining = segs.length;
+  // Lặp: mỗi lần nối 1 chuỗi liên tục dài nhất
+  while(remaining > 0){
+    // Tìm đoạn chưa dùng đầu tiên
+    var startIdx = -1;
+    for(var i=0; i<segs.length; i++){ if(!used[i]){ startIdx=i; break; } }
+    if(startIdx===-1) break;
+    var chain = segs[startIdx].slice();
+    used[startIdx]=true; remaining--;
+    // Mở rộng về phía cuối
+    var extended=true;
+    while(extended){
+      extended=false;
+      var endPt = chain[chain.length-1];
+      for(var j=0; j<segs.length; j++){
+        if(used[j]) continue;
+        var seg = segs[j];
+        var dStart = haversine(endPt, seg[0]);
+        var dEnd = haversine(endPt, seg[seg.length-1]);
+        // Nối nếu điểm trùng trong vòng 100m (cho phép sai số OSM)
+        if(dStart < 100){
+          // Nối thuận: bỏ điểm đầu trùng, thêm phần còn lại
+          for(var k=1; k<seg.length; k++) chain.push(seg[k]);
+          used[j]=true; remaining--; extended=true; break;
+        } else if(dEnd < 100){
+          // Nối ngược: đảo đoạn rồi nối
+          for(var k=seg.length-2; k>=0; k--) chain.push(seg[k]);
+          used[j]=true; remaining--; extended=true; break;
+        }
+      }
+    }
+    // Mở rộng về phía đầu (tìm đoạn nối vào điểm đầu)
+    extended=true;
+    while(extended){
+      extended=false;
+      var startPt = chain[0];
+      for(var j=0; j<segs.length; j++){
+        if(used[j]) continue;
+        var seg = segs[j];
+        var dStart = haversine(startPt, seg[0]);
+        var dEnd = haversine(startPt, seg[seg.length-1]);
+        if(dEnd < 100){
+          // Đoạn kết thúc tại điểm đầu chain → thêm vào trước (bỏ điểm cuối trùng)
+          var prefix = seg.slice(0, seg.length-1);
+          chain = prefix.concat(chain);
+          used[j]=true; remaining--; extended=true; break;
+        } else if(dStart < 100){
+          // Đoạn bắt đầu tại điểm đầu chain → đảo rồi thêm vào trước
+          var prefix = [];
+          for(var k=seg.length-1; k>=1; k--) prefix.push(seg[k]);
+          chain = prefix.concat(chain);
+          used[j]=true; remaining--; extended=true; break;
+        }
+      }
+    }
+    // Thêm chuỗi này vào kết quả (ngăn cách bằng null để vẽ riêng từng tuyến)
+    if(result.length>0) result.push(null); // Đánh dấu ngắt tuyến
+    for(var c=0; c<chain.length; c++) result.push(chain[c]);
+  }
+  return result;
+}
+
+// ===== BÁM TIM ĐƯỜNG THEO OSM =====
+// Tìm điểm gần nhất trên tuyến OSM (trả về {point, chainIdx, index, distance})
+// osmReference là mảng các chuỗi: [[{lat,lon},...], [{lat,lon},...]]
+function snapToOSM(lat, lon){
+  if(!osmReference || osmReference.length===0) return null;
+  // Hỗ trợ cả format cũ (flat array) và mới (array of chains)
+  var chains = osmReference;
+  if(chains.length>0 && chains[0] && typeof chains[0].lat==='number'){
+    chains = [chains]; // Format cũ: flat → bọc thành 1 chuỗi
+  }
+  var best=null, bestDist=Infinity, bestChain=0, bestIdx=0;
+  for(var c=0; c<chains.length; c++){
+    var chain = chains[c];
+    if(!chain || chain.length<2) continue;
+    for(var i=0; i<chain.length; i++){
+      var d=haversine({lat:lat,lon:lon}, chain[i]);
+      if(d<bestDist){ bestDist=d; bestChain=c; bestIdx=i; best=chain[i]; }
+    }
+  }
+  if(!best) return null;
+  return {point:best, chainIdx:bestChain, index:bestIdx, distance:bestDist};
+}
+
+// Xây dựng tuyến theo OSM giữa các điểm đã bấm
+// Thay vì nối thẳng, đi theo hình học OSM từ điểm này sang điểm kia
+function buildRouteViaOSM(clickedPoints){
+  if(!osmReference || osmReference.length===0) return null;
+  var chains = osmReference;
+  if(chains.length>0 && chains[0] && typeof chains[0].lat==='number'){
+    chains = [chains];
+  }
+  // Bám từng điểm bấm vào OSM → ghi cả chainIdx + index
+  var snapped=[];
+  for(var i=0;i<clickedPoints.length;i++){
+    var s=snapToOSM(clickedPoints[i].lat, clickedPoints[i].lon);
+    if(!s) return null;
+    snapped.push(s);
+  }
+  // Nối theo OSM: từ điểm này đến điểm kia
+  var result=[];
+  for(var j=0;j<snapped.length-1;j++){
+    var sA=snapped[j], sB=snapped[j+1];
+    // Nếu 2 điểm thuộc 2 chuỗi khác nhau → nối thẳng (không đi qua chuỗi khác)
+    // (Tránh nhảy cóc qua các chuỗi không liên quan)
+    if(sA.chainIdx !== sB.chainIdx){
+      // Nối thẳng từ điểm A đến điểm B
+      if(result.length===0) result.push(sA.point);
+      result.push(sB.point);
+      continue;
+    }
+    // Cùng chuỗi → đi theo OSM từ index A đến index B
+    var chain = chains[sA.chainIdx];
+    var a=sA.index, b=sB.index;
+    var step = a<b ? 1 : -1;
+    for(var k=a; step>0 ? k<=b : k>=b; k+=step){
+      if(result.length>0 && result[result.length-1]===chain[k]) continue;
+      result.push(chain[k]);
+    }
+  }
+  return result;
+}
+
+// VN-2000 (7 tham số Bursa-Wolf) -> WGS84 (xấp xỉ, đủ cho số hóa)
+function vn2000ToWGS84(x,y,lon0){
+  var a=6378137, e2=0.00669437999014;
+  var k0=0.9999, fe=500000, fn=0;
+  var lon0r=lon0*Math.PI/180;
+  var M=fn+y/k0;
+  var mu=M/(a*(1-e2/4-3*e2*e2/64-5*e2*e2*e2/256));
+  var e1=(1-Math.sqrt(1-e2))/(1+Math.sqrt(1-e2));
+  var J1=3*e1/2-27*e1*e1*e1/32, J2=21*e1*e1/16-55*e1*e1*e1*e1/32, J3=151*e1*e1*e1/96, J4=1097*e1*e1*e1*e1/512;
+  var fp=mu+J1*Math.sin(2*mu)+J2*Math.sin(4*mu)+J3*Math.sin(6*mu)+J4*Math.sin(8*mu);
+  var C1=e2*Math.cos(fp)*Math.cos(fp)/(1-e2);
+  var T1=Math.tan(fp)*Math.tan(fp);
+  var N1=a/Math.sqrt(1-e2*Math.sin(fp)*Math.sin(fp));
+  var R1=a*(1-e2)/Math.pow(1-e2*Math.sin(fp)*Math.sin(fp),1.5);
+  var D=(x-fe)/ (N1*k0);
+  var lat=fp-(N1*Math.tan(fp)/R1)*(D*D/2-(5+3*T1+10*C1-4*C1*C1-9*e2)*Math.pow(D,4)/24+(61+90*T1+298*C1+45*T1*T1-252*e2-3*C1*C1)*Math.pow(D,6)/720);
+  var lon=lon0r+(D-(1+2*T1+C1)*Math.pow(D,3)/6+(5-2*C1+28*T1-3*C1*C1+8*e2+24*T1*T1)*Math.pow(D,5)/120)/Math.cos(fp);
+  // Chuyển VN-2000 -> WGS84 (7 tham số)
+  var dx=-191.904, dy=-39.303, dz=-111.503, rx=-0.009, ry=0.019, rz=0.004, s=0.000000006;
+  var latD=lat*180/Math.PI, lonD=lon*180/Math.PI;
+  return {lat: latD + (-dx*Math.sin(lat)*Math.cos(lon)-dy*Math.sin(lat)*Math.sin(lon)+dz*Math.cos(lat))/ (a*180/Math.PI), lon: lonD + (-dx*Math.sin(lon)+dy*Math.cos(lon))/ (a*Math.cos(lat)*180/Math.PI)};
+}
+function isVN2000(coords){
+  // Nếu tọa độ > 1000 -> chắc chắn VN-2000 (mét)
+  return coords.some(function(c){ return Math.abs(c[0])>1000 || Math.abs(c[1])>1000; });
+}
+
+// ===== TAB 1: BÁM TIM =====
+function startDigitize(){
+  isDigitizing = !isDigitizing;
+  var btn = document.getElementById('btnDigitize');
+  if(isDigitizing){
+    btn.textContent = '⏹️ Dừng bấm điểm';
+    btn.style.background = '#c0392b';
+    document.getElementById('map').style.cursor = 'crosshair';
+    setStatus('ĐANG BẤM ĐIỂM — Click lên bản đồ để đặt điểm. Click nút lần nữa để dừng.');
+  } else {
+    btn.textContent = '✏️ Bắt đầu bấm điểm';
+    btn.style.background = '';
+    document.getElementById('map').style.cursor = '';
+    setStatus('Đã dừng bấm điểm. ' + routePoints.length + ' điểm đã đặt.');
+  }
+}
+function addPoint(lat,lon,name){
+  var finalLat=lat, finalLon=lon, snapInfo='';
+  // Nếu có tuyến OSM tham chiếu, tự bám vào tim đường (không giới hạn khoảng cách)
+  if(osmReference){
+    var s=snapToOSM(lat,lon);
+    if(s){
+      finalLat=s.point.lat; finalLon=s.point.lon;
+      snapInfo=' (đã bám tim OSM)';
+    }
+  }
+  routePoints.push({lat:finalLat,lon:finalLon,name:name||('Điểm '+(routePoints.length+1))});
+  renderRoute();
+  setStatus('Đã đặt '+name+' tại '+finalLat.toFixed(5)+', '+finalLon.toFixed(5)+snapInfo+' — Tổng: '+routePoints.length+' điểm.');
+}
+function undoPoint(){ routePoints.pop(); renderRoute(); }
+function clearRoute(){
+  routePoints=[];
+  drawLayer.clearLayers();
+  currentRoute=null;
+  isDigitizing=false;
+  var btn=document.getElementById('btnDigitize');
+  if(btn){ btn.textContent='✏️ Bắt đầu bấm điểm'; btn.style.background=''; }
+  document.getElementById('map').style.cursor='';
+  document.getElementById('pointsList').innerHTML='';
+  setStatus('Đã xóa hết điểm.');
+}
+function renderRoute(){
+  drawLayer.clearLayers();
+  markers=[];
+  routePoints.forEach(function(p,i){
+    var m=L.marker([p.lat,p.lon],{draggable:true,title:p.name}).addTo(drawLayer);
+    // Dùng closure để giữ đúng index
+    (function(idx, marker){
+      marker.on('dragend',function(){
+        var ll=marker.getLatLng();
+        routePoints[idx].lat=ll.lat; routePoints[idx].lon=ll.lng;
+        renderRoute();
+        setStatus('Đã kéo điểm '+(idx+1)+' → '+ll.lat.toFixed(5)+', '+ll.lng.toFixed(5));
+      });
+    })(i, m);
+    m.bindPopup('<b>'+p.name+'</b><br>'+p.lat.toFixed(6)+', '+p.lon.toFixed(6)+'<br><i>Kéo để di chuyển</i>');
+    markers.push(m);
+  });
+  if(routePoints.length>=2){
+    var coords=routePoints.map(function(p){return {lat:p.lat,lon:p.lon};});
+    // Vẽ tuyến tạm (màu nhạt) - bấm "Nối tuyến" để tạo tuyến chính thức
+    L.polyline(coords.map(function(c){return [c.lat,c.lon];}),{color:'#e74c3c',weight:3,opacity:0.6,dashArray:'5,5'}).addTo(drawLayer);
+    var len=routeLength(coords);
+    // Cập nhật currentRoute ngay để xuất được
+    currentRoute={coords:coords,name:document.getElementById('routeName').value||'Tuyến mới',source:'Tab1'};
+    var html='<b>Điểm đã bấm: '+routePoints.length+'</b> | Dài tạm tính: '+(len/1000).toFixed(2)+' km';
+    html+='<br><i>Bấm "🔗 Nối thành tim đường" để tạo tuyến chính thức + LRS.</i>';
+    html+='<table><tr><th>#</th><th>Tên</th><th>Vĩ độ</th><th>Kinh độ</th></tr>';
+    routePoints.forEach(function(p,i){ html+='<tr><td>'+(i+1)+'</td><td>'+p.name+'</td><td>'+p.lat.toFixed(5)+'</td><td>'+p.lon.toFixed(5)+'</td></tr>'; });
+    html+='</table>';
+    document.getElementById('pointsList').innerHTML=html;
+    setStatus('Đã bấm '+routePoints.length+' điểm, dài tạm '+(len/1000).toFixed(2)+' km. Bấm "Nối tuyến" để hoàn tất.');
+  }
+}
+function importExcel(){
+  var txt=document.getElementById('excelPaste').value.trim();
+  if(!txt){ alert('Dán dữ liệu trước!'); return; }
+  var lines=txt.split('\n');
+  routePoints=[];
+  lines.forEach(function(ln){
+    var parts=ln.split(/[\t,;]+/);
+    if(parts.length>=3){
+      var name=parts[0].trim(), lat=parseFloat(parts[1]), lon=parseFloat(parts[2]);
+      if(!isNaN(lat)&&!isNaN(lon)) routePoints.push({lat:lat,lon:lon,name:name});
+    }
+  });
+  renderRoute();
+  setStatus('Đã nhập '+routePoints.length+' điểm từ Excel.');
+}
+
+// ===== TAB 2: NHẬP FILE =====
+var dz=document.getElementById('dropzone');
+dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave',function(){ dz.classList.remove('dragover'); });
+dz.addEventListener('drop',function(e){ e.preventDefault(); dz.classList.remove('dragover'); var f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+function handleFile(f){
+  if(!f) return;
+  document.getElementById('fileInfo').innerHTML='Đang đọc: <b>'+f.name+'</b> ('+(f.size/1024).toFixed(1)+' KB)...';
+  var ext=f.name.split('.').pop().toLowerCase();
+  var reader=new FileReader();
+  if(ext==='zip'){
+    reader.onload=function(){ parseShapefile(reader.result,f.name); };
+    reader.readAsArrayBuffer(f);
+  } else if(ext==='dxf'){
+    reader.onload=function(){ parseDXF(reader.result); };
+    reader.readAsText(f);
+  } else {
+    reader.onload=function(){ parseTextFile(reader.result,f.name,ext); };
+    reader.readAsText(f);
+  }
+}
+function parseTextFile(text,fname,ext){
+  try{
+    var coords=[];
+    if(ext==='kml'){
+      var doc=new DOMParser().parseFromString(text,'text/xml');
+      var coordEls=doc.getElementsByTagName('coordinates');
+      for(var i=0;i<coordEls.length;i++){
+        var pts=coordEls[i].textContent.trim().split(/\s+/);
+        pts.forEach(function(pt){
+          var p=pt.split(',');
+          if(p.length>=2) coords.push([parseFloat(p[0]),parseFloat(p[1])]);
+        });
+      }
+    } else if(ext==='geojson'||ext==='json'){
+      var gj=JSON.parse(text);
+      var feats=gj.features||[gj];
+      feats.forEach(function(fe){
+        var g=fe.geometry||fe;
+        if(g.type==='LineString') g.coordinates.forEach(function(c){ coords.push(c); });
+        if(g.type==='MultiLineString') g.coordinates.forEach(function(line){ line.forEach(function(c){ coords.push(c); }); });
+        if(g.type==='Polygon') g.coordinates[0].forEach(function(c){ coords.push(c); });
+      });
+    }
+    if(coords.length<2){ document.getElementById('fileInfo').innerHTML='⚠️ Không tìm thấy hình học tuyến trong file.'; return; }
+    applyCoords(coords,fname);
+  }catch(e){ document.getElementById('fileInfo').innerHTML='❌ Lỗi đọc file: '+e.message; }
+}
+function parseShapefile(buf,fname){
+  if(typeof shp==='undefined'){ document.getElementById('fileInfo').innerHTML='⚠️ Thư viện Shapefile chưa tải. Kiểm tra mạng.'; return; }
+  shp(buf).then(function(gj){
+    var coords=[];
+    (gj.features||[]).forEach(function(fe){
+      var g=fe.geometry;
+      if(g.type==='LineString') g.coordinates.forEach(function(c){ coords.push(c); });
+      if(g.type==='MultiLineString') g.coordinates.forEach(function(line){ line.forEach(function(c){ coords.push(c); }); });
+    });
+    if(coords.length<2){ document.getElementById('fileInfo').innerHTML='⚠️ Shapefile không có tuyến.'; return; }
+    applyCoords(coords,fname);
+  }).catch(function(e){ document.getElementById('fileInfo').innerHTML='❌ Lỗi SHP: '+e.message; });
+}
+function parseDXF(text){
+  var lines=text.split(/\r?\n/);
+  var coords=[], i=0, cur=null;
+  while(i<lines.length){
+    var code=lines[i].trim(), val=(lines[i+1]||'').trim();
+    if(code==='0' && (val==='LINE'||val==='LWPOLYLINE'||val==='POLYLINE')){
+      if(cur && cur.length>=2) coords=coords.concat(cur);
+      cur=[];
+    }
+    if(code==='10' && cur!==null) cur.push([parseFloat(val),null]);
+    if(code==='20' && cur!==null && cur.length>0) cur[cur.length-1][1]=parseFloat(val);
+    i+=2;
+  }
+  if(cur && cur.length>=2) coords=coords.concat(cur);
+  coords=coords.filter(function(c){ return c[0]!==null && c[1]!==null; });
+  if(coords.length<2){ document.getElementById('fileInfo').innerHTML='⚠️ DXF không có LINE/LWPOLYLINE.'; return; }
+  applyCoords(coords,'DXF');
+}
+function applyCoords(rawCoords,srcName){
+  var isVN=isVN2000(rawCoords);
+  var lon0=104.75;
+  var provSel=document.getElementById('provinceSelect').value;
+  if(provSel!=='auto') lon0=parseFloat(provSel);
+  var coords=rawCoords.map(function(c){
+    if(isVN){
+      var w=vn2000ToWGS84(c[0],c[1],lon0);
+      return {lat:w.lat,lon:w.lon};
+    } else {
+      return {lat:c[1],lon:c[0]};
+    }
+  });
+  // Ghép đoạn rời: sắp xếp theo khoảng cách gần nhất (đơn giản)
+  currentRoute={coords:coords,name:srcName||'Tuyến nhập',source:'Tab2'};
+  drawLayer.clearLayers();
+  L.polyline(coords.map(function(p){return [p.lat,p.lon];}),{color:'#2980b9',weight:4}).addTo(drawLayer);
+  map.fitBounds(L.polyline(coords.map(function(p){return [p.lat,p.lon];})).getBounds());
+  var len=routeLength(coords);
+  document.getElementById('fileInfo').innerHTML='✅ Đã nhập <b>'+coords.length+'</b> điểm từ '+srcName+'. Hệ: '+(isVN?'VN-2000 → WGS84':'WGS84')+'. Dài: '+(len/1000).toFixed(2)+' km.';
+  setStatus('Đã nhập file: '+(len/1000).toFixed(2)+' km.');
+}
+
+// ===== TAB 3: OSM OVERPASS =====
+
+// Danh sách mã tuyến TOÀN QUỐC - Tìm từ Wikipedia (nguồn web, KHÔNG từ dữ liệu user)
+// CT: 46 tuyến | QL: 152 tuyến | TSĐ, ĐHCM: Tuyến đặc biệt
+// BỎ ĐT: Đường tỉnh theo từng tỉnh, không phải hệ thống toàn quốc
+// Nguồn: Wikipedia (Quốc lộ Việt Nam, Hệ thống đường cao tốc Việt Nam)
+var VN_ROUTES = {
+  'Cao tốc - 46 tuyến (CT)': [
+    'CT.01','CT.02','CT.03','CT.04','CT.05','CT.06','CT.07','CT.08','CT.09','CT.10',
+    'CT.11','CT.12','CT.13','CT.14','CT.15','CT.16','CT.17','CT.18','CT.19','CT.20',
+    'CT.21','CT.22','CT.23','CT.24','CT.25','CT.26','CT.27','CT.28','CT.29','CT.30',
+    'CT.31','CT.32','CT.33','CT.34','CT.35','CT.36','CT.37','CT.38','CT.39','CT.40',
+    'CT.41','CT.42','CT.43','CT.44','CT.45','CT.46'
+  ],
+  'Quốc lộ - 152 tuyến (QL, từ Wikipedia)': [
+    'QL1','QL1A','QL1B','QL1C','QL1D','QL1K','QL2A','QL2B','QL2C','QL2D',
+    'QL3','QL3A','QL3B','QL3C','QL3E','QL4A','QL4B','QL4C','QL4D','QL4E',
+    'QL4G','QL4H','QL5','QL5C','QL6A','QL6B','QL7A','QL7B','QL8','QL8B',
+    'QL8C','QL9A','QL9B','QL9C','QL9D','QL9E','QL9G','QL10','QL12','QL12A',
+    'QL12B','QL12C','QL13','QL14A','QL14B','QL14C','QL14D','QL14E','QL14G','QL14H',
+    'QL15','QL15A','QL15B','QL15C','QL15D','QL16','QL17','QL17B','QL18','QL18C',
+    'QL19A','QL19B','QL19C','QL19D','QL20','QL21A','QL21B','QL21C','QL22','QL22A',
+    'QL22B','QL23','QL24A','QL24B','QL24C','QL25','QL26A','QL26B','QL27A','QL27B',
+    'QL27C','QL28A','QL28B','QL29','QL30','QL31','QL32','QL32B','QL32C','QL34',
+    'QL35','QL37A','QL37B','QL37C','QL38A','QL38B','QL39A','QL39B','QL40A','QL40B',
+    'QL43','QL45','QL46A','QL46B','QL46C','QL47','QL47B','QL47C','QL48','QL48B',
+    'QL48C','QL48D','QL48E','QL49A','QL49B','QL49C','QL50','QL51','QL52','QL53',
+    'QL54','QL55A','QL55B','QL56','QL56B','QL57A','QL57B','QL57C','QL60','QL61A',
+    'QL61B','QL61C','QL62','QL63','QL70A','QL70B','QL71','QL80','QL91','QL91A',
+    'QL91B','QL91C','QL217','QL217B','QL279','QL279B','QL279C','QL279D','QL280','QL281',
+    'QLN1','QLN2',
+  ],
+  'Tuyến đặc biệt': ['TSĐ','ĐHCM']
+};
+
+
+// ===== CACHE OSM (localStorage) =====
+function getOSMCacheKey(ref, prov){ return 'osm_cache_' + ref.toUpperCase().replace(/[^A-Z0-9]/g,'') + '_' + prov.toLowerCase().replace(/[^a-z0-9]/g,''); }
+function loadOSMCache(ref, prov){
+  try{
+    var key=getOSMCacheKey(ref, prov);
+    var raw=localStorage.getItem(key);
+    if(!raw) return null;
+    var data=JSON.parse(raw);
+    // Cache hết hạn sau 7 ngày
+    if(Date.now() - data.timestamp > 7*24*60*60*1000){ localStorage.removeItem(key); return null; }
+    return data.coords;
+  }catch(e){ return null; }
+}
+function saveOSMCache(ref, prov, coords){
+  try{
+    var key=getOSMCacheKey(ref, prov);
+    localStorage.setItem(key, JSON.stringify({coords:coords, timestamp:Date.now()}));
+    return true;
+  }catch(e){ console.warn('Không lưu được cache OSM:', e.message); return false; }
+}
+function clearOSMCache(){
+  try{
+    var keys=[];
+    for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k && k.indexOf('osm_cache_')===0) keys.push(k); }
+    keys.forEach(function(k){ localStorage.removeItem(k); });
+    return keys.length;
+  }catch(e){ return 0; }
+}
+
+// BBox các tỉnh (south,west,north,east) để truy vấn Overpass ổn định hơn area name
+var PROV_BBOX={
+  // 34 tỉnh/thành sau sáp nhập 01/07/2025 (Nghị quyết 202/2025/QH15)
+  // Format: [Nam, Tây, Bắc, Đông] - BBox xấp xỉ
+  'Hà Nội':[20.5,105.3,21.6,106.2],
+  'Cao Bằng':[22.4,105.5,23.4,106.9],
+  'Tuyên Quang':[21.5,104.8,23.0,106.1],
+  'Điện Biên':[20.9,102.9,22.4,104.6],
+  'Lai Châu':[21.8,102.7,22.8,104.2],
+  'Sơn La':[20.7,103.5,22.0,105.4],
+  'Lào Cai':[21.7,103.8,22.8,105.0],
+  'Thái Nguyên':[21.2,105.4,22.2,106.3],
+  'Lạng Sơn':[21.2,106.2,22.4,107.4],
+  'Quảng Ninh':[20.7,106.5,21.7,108.4],
+  'Bắc Ninh':[20.9,105.8,21.5,106.5],
+  'Phú Thọ':[20.7,104.8,21.6,106.0],
+  'Hải Phòng':[20.6,106.3,21.2,107.2],
+  'Hưng Yên':[20.4,105.9,21.0,106.6],
+  'Ninh Bình':[19.9,105.7,20.6,106.4],
+  'Thanh Hóa':[19.2,104.9,20.7,106.1],
+  'Nghệ An':[18.7,104.3,19.9,105.9],
+  'Hà Tĩnh':[17.9,105.5,18.9,106.4],
+  'Quảng Trị':[16.4,106.3,17.4,107.4],
+  'Huế':[15.9,107.1,16.7,108.2],
+  'Đà Nẵng':[15.7,107.8,16.2,108.4],
+  'Quảng Ngãi':[14.6,108.4,15.6,109.4],
+  'Gia Lai':[12.8,107.4,14.8,109.0],
+  'Khánh Hòa':[11.8,108.6,13.1,109.5],
+  'Đắk Lắk':[12.2,107.5,13.5,109.0],
+  'Lâm Đồng':[11.1,107.4,12.4,108.8],
+  'Đồng Nai':[10.7,106.7,11.7,107.8],
+  'TP. Hồ Chí Minh':[10.3,106.3,11.2,107.1],
+  'Tây Ninh':[10.7,105.8,11.5,106.8],
+  'Đồng Tháp':[10.2,105.2,10.9,106.1],
+  'Vĩnh Long':[9.8,105.4,10.4,106.4],
+  'An Giang':[10.0,104.8,10.9,105.8],
+  'Cần Thơ':[9.9,105.4,10.3,105.9],
+  'Cà Mau':[8.6,104.7,9.4,105.5]
+};
+var OVERPASS_SERVERS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.maps.mail.ru/api/interpreter'];
+
+function fetchOSM(){
+  var ref=document.getElementById('osmRef').value.trim();
+  var prov=document.getElementById('osmProvince').value.trim();
+  var type=document.getElementById('osmType').value;
+  if(!ref){ alert('Nhập mã tuyến!'); return; }
+  // Kiểm tra cache trước
+  var cached=loadOSMCache(ref, prov);
+  if(cached && cached.length>=2){
+    var cachedCoords=cached.map(function(c){ return {lat:c.lat,lon:c.lon}; });
+    currentRoute={coords:cachedCoords,name:ref+' - '+prov,source:'OSM (cache)'};
+    // Cache lưu flat → chuyển thành 1 chuỗi (cache cũ không có thông tin chuỗi)
+    osmReference=[cachedCoords];
+    drawLayer.clearLayers();
+    L.polyline(cachedCoords.map(function(p){return [p.lat,p.lon];}),{color:'#27ae60',weight:4}).addTo(drawLayer);
+    map.fitBounds(L.polyline(cachedCoords.map(function(p){return [p.lat,p.lon];})).getBounds());
+    var len=routeLength(cachedCoords);
+    document.getElementById('osmInfo').innerHTML='✅ Đã tải từ <b>Bộ nhớ cache</b> (không cần tải lại): <b>'+cachedCoords.length+'</b> điểm. Dài: '+(len/1000).toFixed(2)+' km.<br><i>✅ Tuyến này đã lưu làm tham chiếu. Sang Tab 1, điểm bấm sẽ tự bám vào tim đường này.</i>';
+    setStatus('OSM (cache): '+ref+' — '+(len/1000).toFixed(2)+' km.');
+    return;
+  }
+  document.getElementById('osmInfo').innerHTML='Đang tải từ Overpass (chưa có cache)...';
+  // Tạo regex ref chấp nhận QL19 / QL.19 / QL 19 / QL-19
+  var refClean = ref.trim().replace(/\s+/g,'');
+  var refRe = refClean;
+  var m = refClean.match(/^([A-ZĐ]+)[.\s\-]*(.+)$/i);
+  if(m){
+    var prefix = m[1], rest = m[2].replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    refRe = prefix + '[ .\\-]?'+rest;
+  } else {
+    refRe = refClean.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  }
+  var bbox = PROV_BBOX[prov];
+  var bboxStr = bbox ? '('+bbox.join(',')+')' : '';
+  // Truy vấn CẢ relation VÀ way — OSM lưu tuyến dưới dạng relation
+  var query = '[out:json][timeout:90];'
+    + '('
+    + 'relation["route"="road"]["ref"~"^'+refRe+'$",i]'+bboxStr+';'
+    + 'way["highway"]["ref"~"^'+refRe+'$",i]'+bboxStr+';'
+    + ');'
+    + 'out geom;';
+  tryOverpass(0, query, ref, prov);
+}
+function tryOverpass(idx, query, ref, prov){
+  if(idx>=OVERPASS_SERVERS.length){
+    document.getElementById('osmInfo').innerHTML='❌ Tất cả máy chủ Overpass đều không phản hồi.<br>Thử lại sau vài phút, hoặc dùng Tab 1/2.<br><small>Nguyên nhân có thể: Overpass đang quá tải, mạng bị chặn, hoặc tuyến chưa có trên OSM.</small>';
+    return;
+  }
+  var server=OVERPASS_SERVERS[idx];
+  document.getElementById('osmInfo').innerHTML='Đang tải từ '+server.split('/')[2]+'... (thử '+(idx+1)+'/'+OVERPASS_SERVERS.length+')';
+  fetch(server,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(query)})
+  .then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  })
+  .then(function(data){
+    if(data.remark && /rate/i.test(data.remark)){ throw new Error('Rate limit - thử server khác'); }
+    // Trích TỪNG ĐOẠN riêng biệt (không gộp chung) để nối theo tính liên thông
+    var segments=[];
+    var wayMap={};
+    (data.elements||[]).forEach(function(el){
+      if(el.type==='way' && el.geometry){
+        wayMap[el.id] = el.geometry.map(function(pt){ return {lat:pt.lat,lon:pt.lon}; });
+      }
+    });
+    (data.elements||[]).forEach(function(el){
+      if(el.type==='way' && el.geometry){
+        var seg = el.geometry.map(function(pt){ return {lat:pt.lat,lon:pt.lon}; });
+        if(seg.length>=2) segments.push(seg);
+      } else if(el.type==='relation' && el.members){
+        el.members.forEach(function(m){
+          if(m.type==='way' && m.geometry){
+            var seg = m.geometry.map(function(pt){ return {lat:pt.lat,lon:pt.lon}; });
+            if(seg.length>=2) segments.push(seg);
+          } else if(m.type==='way' && m.ref && wayMap[m.ref]){
+            segments.push(wayMap[m.ref].slice());
+          }
+        });
+      }
+    });
+    if(segments.length===0){
+      document.getElementById('osmInfo').innerHTML='⚠️ Không tìm thấy tuyến <b>'+ref+'</b>'+(prov?' tại '+prov:'')+'.<br>Gợi ý: thử mã khác (VD: QL19 thay vì QL.19), hoặc để trống tỉnh để tìm toàn quốc.<br><small>Nguyên nhân có thể: tuyến chưa có trên OSM, mã ref ghi khác, hoặc OSM chưa cập nhật.</small>';
+      return;
+    }
+    // Nối các đoạn theo tính liên thông (thay vì nối theo thứ tự Overpass)
+    var chained = chainOSMSegments(segments);
+    // Tách thành các chuỗi riêng (mảng các mảng) — GIỮ cấu trúc chuỗi
+    var chains = [];
+    var currentChain = [];
+    var totalRawPoints = 0;
+    segments.forEach(function(s){ totalRawPoints += s.length; });
+    chained.forEach(function(pt){
+      if(pt===null){
+        if(currentChain.length>=2) chains.push(currentChain);
+        currentChain=[];
+      } else currentChain.push(pt);
+    });
+    if(currentChain.length>=2) chains.push(currentChain);
+    // finalCoords: gộp flat để vẽ + xuất (giữ tương thích)
+    var finalCoords = [];
+    chains.forEach(function(c){ finalCoords = finalCoords.concat(c); });
+    var chainCount = chains.length;
+    currentRoute={coords:finalCoords,name:ref+' - '+prov,source:'OSM',chains:chains};
+    // osmReference: giữ dạng chains để buildRouteViaOSM không nhảy cóc giữa các chuỗi
+    osmReference=chains;
+    saveOSMCache(ref, prov, finalCoords);
+    // Vẽ từng chuỗi riêng (không vẽ đường nối giữa các nhánh)
+    drawLayer.clearLayers();
+    var drawChains = chains;
+    if(drawChains.length===0 && finalCoords.length>=2) drawChains=[finalCoords];
+    var bounds=null;
+    drawChains.forEach(function(chain){
+      var line=L.polyline(chain.map(function(p){return [p.lat,p.lon];}),{color:'#27ae60',weight:4}).addTo(drawLayer);
+      if(!bounds) bounds=line.getBounds(); else bounds.extend(line.getBounds());
+    });
+    if(bounds) map.fitBounds(bounds);
+    // Tính chiều dài: tổng từng chuỗi riêng (không tính đường nhảy giữa các nhánh)
+    var len=0;
+    drawChains.forEach(function(chain){ len+=routeLength(chain); });
+    var infoMsg='✅ Tải xong từ '+server.split('/')[2]+': <b>'+finalCoords.length+'</b> điểm, <b>'+drawChains.length+'</b> đoạn liên tục. Dài: '+(len/1000).toFixed(2)+' km.';
+    if(drawChains.length>1) infoMsg+='<br><small>⚠️ Tuyến gồm '+drawChains.length+' đoạn rời — OSM chưa nối liền hoặc có nhiều nhánh. Đây là dữ liệu gốc từ OSM, không phải lỗi hiển thị.</small>';
+    if(totalRawPoints > finalCoords.length*1.2) infoMsg+='<br><small>ℹ️ Đã loại '+(totalRawPoints-finalCoords.length).toLocaleString()+' điểm trùng lặp.</small>';
+    document.getElementById('osmInfo').innerHTML=infoMsg;
+    document.getElementById('osmInfo').innerHTML+='<br><i>✅ Tuyến này đã lưu làm tham chiếu + lưu cache. Sang Tab 1, điểm bấm sẽ tự bám vào tim đường này.</i>';
+    setStatus('OSM: '+ref+' — '+(len/1000).toFixed(2)+' km.');
+  })
+  .catch(function(e){
+    console.warn('Overpass server '+idx+' failed:',e.message);
+    tryOverpass(idx+1, query, ref, prov);
+  });
+}
+
+// ===== XUẤT DỮ LIỆU =====
+// Nối tuyến từ điểm đã bấm - gọi tường minh
+function connectRoute(){
+  if(routePoints.length<2){
+    alert('Cần ít nhất 2 điểm để nối tuyến! Hiện có: '+routePoints.length);
+    return;
+  }
+  var coords;
+  var usedOSM=false;
+  // Nếu có OSM tham chiếu, bám theo tim đường OSM
+  if(osmReference){
+    var osmCoords=buildRouteViaOSM(routePoints);
+    if(osmCoords && osmCoords.length>=2){
+      coords=osmCoords;
+      usedOSM=true;
+      setStatus('Đang bám tim theo OSM ('+coords.length+' điểm)...');
+    } else {
+      coords=routePoints.map(function(p){return {lat:p.lat,lon:p.lon};});
+      alert('⚠️ Chưa có dữ liệu OSM tham chiếu. Hệ thống nối thẳng giữa các điểm.\n\nGợi ý: Tải tuyến từ Tab 3 trước để bám đúng tim đường.');
+    }
+  } else {
+    coords=routePoints.map(function(p){return {lat:p.lat,lon:p.lon};});
+  }
+  currentRoute={coords:coords,name:document.getElementById('routeName').value||'Tuyến mới',source:'Tab1'};
+  // Vẽ lại tuyến đậm
+  drawLayer.clearLayers();
+  markers=[];
+  routePoints.forEach(function(p,i){
+    var m=L.marker([p.lat,p.lon],{draggable:true,title:p.name}).addTo(drawLayer);
+    (function(idx, marker){
+      marker.on('dragend',function(){
+        var ll=marker.getLatLng();
+        routePoints[idx].lat=ll.lat; routePoints[idx].lon=ll.lng;
+        connectRoute();
+      });
+    })(i, m);
+    m.bindPopup('<b>'+p.name+'</b><br>'+p.lat.toFixed(6)+', '+p.lon.toFixed(6));
+    markers.push(m);
+  });
+  var line=L.polyline(coords.map(function(c){return [c.lat,c.lon];}),{color:'#e74c3c',weight:5,opacity:0.9}).addTo(drawLayer);
+  // Đánh dấu điểm đầu/cuối
+  L.circleMarker([coords[0].lat,coords[0].lon],{radius:8,color:'#27ae60',fillColor:'#27ae60',fillOpacity:1}).addTo(drawLayer).bindPopup('<b>ĐIỂM ĐẦU</b>');
+  L.circleMarker([coords[coords.length-1].lat,coords[coords.length-1].lon],{radius:8,color:'#c0392b',fillColor:'#c0392b',fillOpacity:1}).addTo(drawLayer).bindPopup('<b>ĐIỂM CUỐI</b>');
+  var total=routeLength(coords);
+  var lrs=buildLRS();
+  setStatus('✅ Đã nối tuyến: '+(total/1000).toFixed(2)+' km, '+routePoints.length+' điểm, '+lrs.rows.length+' mốc LRS (100m).');
+  var modeText = usedOSM ? 'Bám tim OSM' : 'Nối thẳng';
+  document.getElementById('pointsList').innerHTML='<b>✅ Tuyến đã nối ('+modeText+'):</b> '+(total/1000).toFixed(2)+' km | '+coords.length+' điểm tim | '+lrs.rows.length+' mốc LRS';
+  showLRSTable();
+  map.fitBounds(line.getBounds());
+}
+
+function buildLRS(){
+  if(!currentRoute || !currentRoute.coords || currentRoute.coords.length<2) return null;
+  var startKm=parseFloat(document.getElementById('startKm').value)||0;
+  // Nếu có chains (từ OSM Tab 3): tính LRS từng chuỗi riêng, KHÔNG nối qua ranh giới chuỗi
+  // (Tránh tạo mốc LRS trên đường nhảy cóc giữa các đoạn rời)
+  var chains = currentRoute.chains;
+  if(chains && chains.length>1){
+    var rows=[];
+    var total=0;
+    var acc=0; // Khoảng cách tích lũy toàn tuyến
+    for(var c=0; c<chains.length; c++){
+      var coords=chains[c];
+      if(!coords || coords.length<2) continue;
+      var nextMark=Math.ceil(acc/100)*100; // Mốc tiếp theo (làm tròn lên 100m)
+      if(nextMark<=acc) nextMark=acc+100;
+      var chainAcc=0;
+      for(var i=1; i<coords.length; i++){
+        var seg=haversine(coords[i-1], coords[i]);
+        if(seg===0) continue;
+        while(chainAcc+seg >= (nextMark-acc)){
+          var target=nextMark-acc; // Khoảng cách từ đầu chuỗi đến mốc
+          var f=target/seg;
+          var lat=coords[i-1].lat+(coords[i].lat-coords[i-1].lat)*f;
+          var lon=coords[i-1].lon+(coords[i].lon-coords[i-1].lon)*f;
+          rows.push({km:(startKm+nextMark/1000).toFixed(3), lat:lat.toFixed(6), lon:lon.toFixed(6), dist:Math.round(nextMark), chain:c});
+          nextMark+=100;
+        }
+        chainAcc+=seg;
+      }
+      acc+=chainAcc;
+      total+=chainAcc;
+    }
+    return {rows:rows,total:total,chains:chains.length};
+  }
+  // Trường hợp 1 chuỗi: thuật toán 1 lần duyệt như trước
+  var coords=currentRoute.coords;
+  var total=routeLength(coords);
+  var rows=[];
+  var acc=0;
+  var nextMark=0;
+  for(var i=1; i<coords.length; i++){
+    var seg=haversine(coords[i-1], coords[i]);
+    if(seg===0) continue;
+    while(acc+seg >= nextMark){
+      var f=(nextMark-acc)/seg;
+      var lat=coords[i-1].lat+(coords[i].lat-coords[i-1].lat)*f;
+      var lon=coords[i-1].lon+(coords[i].lon-coords[i-1].lon)*f;
+      rows.push({km:(startKm+nextMark/1000).toFixed(3), lat:lat.toFixed(6), lon:lon.toFixed(6), dist:Math.round(nextMark)});
+      nextMark+=100;
+    }
+    acc+=seg;
+  }
+  if(rows.length===0 || rows[rows.length-1].dist < total){
+    var last=coords[coords.length-1];
+    rows.push({km:(startKm+total/1000).toFixed(3), lat:last.lat.toFixed(6), lon:last.lon.toFixed(6), dist:Math.round(total)});
+  }
+  return {rows:rows,total:total};
+}
+
+function showLRSTable(){
+  var lrs=buildLRS();
+  if(!lrs){
+    document.getElementById('lrsTable').innerHTML='<div class="warn">⚠️ Chưa có tuyến. Bấm điểm rồi bấm "Nối thành tim đường".</div>';
+    return;
+  }
+  var h='<b>Bảng LRS (từng 100m):</b> '+lrs.rows.length+' mốc, tổng '+(lrs.total/1000).toFixed(2)+' km';
+  h+='<div style="max-height:300px;overflow-y:auto"><table><tr><th>Lý trình (Km)</th><th>Vĩ độ</th><th>Kinh độ</th><th>Khoảng cách (m)</th></tr>';
+  lrs.rows.forEach(function(r){
+    h+='<tr><td>'+r.km+'</td><td>'+r.lat+'</td><td>'+r.lon+'</td><td>'+r.dist+'</td></tr>';
+  });
+  h+='</table></div>';
+  document.getElementById('lrsTable').innerHTML=h;
+}
+function exportGeoJSON(){
+  if(!currentRoute && routePoints.length>=2){
+    currentRoute={coords:routePoints.map(function(p){return {lat:p.lat,lon:p.lon};}),name:document.getElementById('routeName').value||'Tuyến mới',source:'Tab1'};
+  }
+  if(!currentRoute){ alert('Chưa có tuyến! Bấm điểm rồi bấm "Nối thành tim đường".'); return; }
+  var n=currentRoute.coords.length;
+  if(n>20000 && !confirm('Tuyến có '+n.toLocaleString()+' điểm → GeoJSON khoảng '+(n*35/1024/1024).toFixed(1)+' MB. Tiếp tục?')) return;
+  var geom;
+  if(currentRoute.chains && currentRoute.chains.length>1){
+    // Nhiều chuỗi → MultiLineString (không nối các chuỗi lại)
+    geom={type:'MultiLineString',coordinates:currentRoute.chains.map(function(chain){ return chain.map(function(p){return [p.lon,p.lat];}); })};
+  } else {
+    geom={type:'LineString',coordinates:currentRoute.coords.map(function(p){return [p.lon,p.lat];})};
+  }
+  var gj={type:'Feature',properties:{name:currentRoute.name,source:currentRoute.source,length_m:routeLength(currentRoute.coords)},geometry:geom};
+  // Dùng JSON.stringify không indent để giảm kích thước (28k điểm: ~1MB thay vì ~3MB)
+  download(JSON.stringify(gj), (currentRoute.name||'tuyen').replace(/[^a-zA-Z0-9_-]/g,'_')+'.geojson','application/json');
+  setStatus('Đã xuất GeoJSON ('+n.toLocaleString()+' điểm). Tải về máy, không lưu Drive.');
+}
+function exportKML(){
+  if(!currentRoute && routePoints.length>=2){
+    currentRoute={coords:routePoints.map(function(p){return {lat:p.lat,lon:p.lon};}),name:document.getElementById('routeName').value||'Tuyến mới',source:'Tab1'};
+  }
+  if(!currentRoute){ alert('Chưa có tuyến! Bấm điểm rồi bấm "Nối thành tim đường".'); return; }
+  var n=currentRoute.coords.length;
+  if(n>20000 && !confirm('Tuyến có '+n.toLocaleString()+' điểm → KML khoảng '+(n*25/1024/1024).toFixed(1)+' MB. Tiếp tục?')) return;
+  var kml='<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>'+currentRoute.name+'</name>';
+  if(currentRoute.chains && currentRoute.chains.length>1){
+    // Nhiều chuỗi → mỗi chuỗi 1 Placemark riêng (không nối)
+    currentRoute.chains.forEach(function(chain, idx){
+      var cs=chain.map(function(p){return p.lon+','+p.lat+',0';}).join(' ');
+      kml+='<Placemark><name>'+currentRoute.name+' - Đoạn '+(idx+1)+'</name><LineString><coordinates>'+cs+'</coordinates></LineString></Placemark>';
+    });
+  } else {
+    var coordStr=currentRoute.coords.map(function(p){return p.lon+','+p.lat+',0';}).join(' ');
+    kml+='<Placemark><name>'+currentRoute.name+'</name><LineString><coordinates>'+coordStr+'</coordinates></LineString></Placemark>';
+  }
+  kml+='</Document></kml>';
+  download(kml,(currentRoute.name||'tuyen').replace(/[^a-zA-Z0-9_-]/g,'_')+'.kml','application/vnd.google-earth.kml+xml');
+  setStatus('Đã xuất KML ('+n.toLocaleString()+' điểm, mở được trên Google Earth). Tải về máy, không lưu Drive.');
+}
+function exportCSV(){
+  if(!currentRoute && routePoints.length>=2){
+    currentRoute={coords:routePoints.map(function(p){return {lat:p.lat,lon:p.lon};}),name:document.getElementById('routeName').value||'Tuyến mới',source:'Tab1'};
+  }
+  var lrs=buildLRS();
+  if(!lrs){ alert('Chưa có tuyến! Bấm điểm (ít nhất 2 điểm) rồi bấm "Nối thành tim đường" trước.'); return; }
+  // Cảnh báo nếu tuyến quá dài (CSV sẽ rất lớn)
+  if(lrs.rows.length>50000){
+    if(!confirm('Tuyến dài '+(lrs.total/1000).toFixed(0)+' km → CSV sẽ có '+lrs.rows.length.toLocaleString()+' dòng (từng 100m). File khoảng '+(lrs.rows.length*30/1024/1024).toFixed(1)+' MB. Tiếp tục?')) return;
+  }
+  var csv='Ly trinh (Km),Vi do, Kinh do, Khoang cach (m)\n';
+  lrs.rows.forEach(function(r){ csv+=r.km+','+r.lat+','+r.lon+','+r.dist+'\n'; });
+  download(csv,'bang_toa_do_LRS.csv','text/csv');
+  document.getElementById('exportInfo').innerHTML='Đã xuất CSV: '+lrs.rows.length.toLocaleString()+' điểm LRS từng 100m. Tổng dài: '+(lrs.total/1000).toFixed(2)+' km. (Tải về máy, KHÔNG lưu lên Drive)';
+  setStatus('Đã xuất CSV LRS.');
+}
+function download(content,filename,mime){
+  var blob=new Blob([content],{type:mime});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ===== HOẠT CẢNH TUYẾN (MOTION) =====
+var motionTimer=null;
+var motionMarker=null;
+var motionIdx=0;
+var motionCoords=[];
+function startMotion(){
+  if(motionTimer){ stopMotion(); }
+  // Lấy tuyến hiện tại: ưu tiên currentRoute, nếu không có thì lấy OSM
+  var coords=null;
+  if(currentRoute && currentRoute.chains && currentRoute.chains.length>0){
+    // Nhiều chuỗi: nối các chuỗi dài nhất (hoặc chuỗi đầu tiên)
+    // Tìm chuỗi dài nhất để chạy hoạt cảnh
+    var longest=0, longestIdx=0;
+    currentRoute.chains.forEach(function(c,i){
+      if(c.length>longest){ longest=c.length; longestIdx=i; }
+    });
+    coords=currentRoute.chains[longestIdx];
+    if(currentRoute.chains.length>1){
+      document.getElementById('motionInfo').innerHTML='⚠️ Tuyến có '+currentRoute.chains.length+' đoạn. Đang chạy đoạn dài nhất ('+longest+' điểm).';
+    }
+  } else if(currentRoute && currentRoute.coords && currentRoute.coords.length>=2){
+    coords=currentRoute.coords;
+  } else if(osmReference && osmReference.length>0){
+    // osmReference là chains
+    var chains=osmReference;
+    if(chains.length>0 && chains[0] && typeof chains[0].lat==='number') chains=[chains];
+    var longest=0, longestIdx=0;
+    chains.forEach(function(c,i){ if(c.length>longest){ longest=c.length; longestIdx=i; } });
+    coords=chains[longestIdx];
+  }
+  if(!coords || coords.length<2){
+    alert('Chưa có tuyến! Tải tuyến OSM (Tab 3) hoặc nối tuyến (Tab 1) trước.');
+    return;
+  }
+  motionCoords=coords;
+  motionIdx=0;
+  var speed=parseInt(document.getElementById('motionSpeed').value)||20;
+  // Tạo marker con trỏ (vòng tròn đỏ pulsing)
+  if(motionMarker) map.removeLayer(motionMarker);
+  motionMarker=L.circleMarker([coords[0].lat,coords[0].lon],{radius:10,color:'#e74c3c',fillColor:'#e74c3c',fillOpacity:0.9,weight:3}).addTo(map);
+  map.setView([coords[0].lat,coords[0].lon], 12);
+  document.getElementById('motionInfo').innerHTML='▶ Đang chạy: 0/'+coords.length+' điểm...';
+  // Chạy hoạt cảnh: mỗi tick di chuyển 1 bước
+  motionTimer=setInterval(function(){
+    motionIdx++;
+    if(motionIdx>=motionCoords.length){
+      stopMotion();
+      document.getElementById('motionInfo').innerHTML='✅ Đã chạy hết tuyến ('+motionCoords.length+' điểm).';
+      return;
+    }
+    var pt=motionCoords[motionIdx];
+    motionMarker.setLatLng([pt.lat,pt.lon]);
+    // Camera theo con trỏ (pan mượt)
+    map.panTo([pt.lat,pt.lon],{animate:true,duration:0.3});
+    // Cập nhật thông tin: điểm hiện tại + lý trình ước tính
+    var dist=0;
+    for(var i=1;i<=motionIdx;i++) dist+=haversine(motionCoords[i-1],motionCoords[i]);
+    document.getElementById('motionInfo').innerHTML='▶ Đang chạy: '+motionIdx+'/'+motionCoords.length+' điểm | Khoảng cách: '+(dist/1000).toFixed(2)+' km | Vị trí: '+pt.lat.toFixed(5)+', '+pt.lon.toFixed(5);
+  }, speed);
+}
+function stopMotion(){
+  if(motionTimer){ clearInterval(motionTimer); motionTimer=null; }
+  if(motionMarker){ map.removeLayer(motionMarker); motionMarker=null; }
+  document.getElementById('motionInfo').innerHTML='⏹ Đã dừng.';
+}
+
+document.addEventListener('DOMContentLoaded',function(){ initRouteDropdown(); initMap(); });
+</script>
+</body>
+</html>
